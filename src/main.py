@@ -13,57 +13,57 @@
 日期: 2026-03-26
 """
 
+import argparse
 import os
 import sys
-import argparse
+from typing import Optional
 
-# 添加src目录到路径
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
-from generate_data import generate_student_data, save_to_excel
-from data_analysis import StudentHeightAnalyzer
-from visualization import HeightVisualizer
-
-
-def get_project_paths():
-    """获取项目各目录路径"""
-    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    return {
-        'base': base_dir,
-        'data': os.path.join(base_dir, 'data'),
-        'src': os.path.join(base_dir, 'src'),
-        'output': os.path.join(base_dir, 'output')
-    }
+import config
+from analyzer import StudentHeightAnalyzer
+from data_generator import generate_student_data, save_to_excel
+from report import ReportGenerator
+from utils import (
+    check_dependencies, ensure_dir, get_data_file_path,
+    get_output_path, get_project_paths, load_data
+)
+from visualizer import HeightVisualizer
 
 
-def check_dependencies():
-    """检查必要的依赖包"""
-    required_packages = ['pandas', 'numpy', 'matplotlib', 'openpyxl']
-    missing_packages = []
+def get_project_paths_wrapper() -> dict:
+    """获取项目各目录路径的包装函数"""
+    return get_project_paths()
 
-    for package in required_packages:
-        try:
-            __import__(package)
-        except ImportError:
-            missing_packages.append(package)
 
-    if missing_packages:
+def check_dependencies_wrapper() -> bool:
+    """检查依赖包的包装函数"""
+    is_ok, missing = check_dependencies()
+    if not is_ok:
         print("错误: 缺少以下依赖包:")
-        for pkg in missing_packages:
+        for pkg in missing:
             print(f"  - {pkg}")
         print("\n请使用以下命令安装:")
-        print(f"  pip install {' '.join(missing_packages)}")
+        print(f"  pip install {' '.join(missing)}")
         return False
     return True
 
 
-def generate_data(paths, n=1000):
-    """生成模拟数据"""
+def generate_data(paths: dict, n: int = 1000) -> str:
+    """
+    生成模拟数据
+
+    Args:
+        paths: 项目路径字典
+        n: 生成数据条数
+
+    Returns:
+        数据文件路径
+    """
     print("\n" + "=" * 60)
     print("步骤 1: 生成模拟数据")
     print("=" * 60)
 
-    data_file = os.path.join(paths['data'], 'student_height_data.xlsx')
+    data_file = os.path.join(paths['data'], config.DEFAULT_DATA_FILENAME)
+    ensure_dir(paths['data'])
 
     print(f"正在生成 {n} 条学生身高数据...")
     df = generate_student_data(n=n)
@@ -78,55 +78,68 @@ def generate_data(paths, n=1000):
     return data_file
 
 
-def analyze_data(paths, data_file):
-    """执行数据分析"""
+def analyze_data(data_file: str) -> StudentHeightAnalyzer:
+    """
+    执行数据分析
+
+    Args:
+        data_file: 数据文件路径
+
+    Returns:
+        分析器实例
+    """
     print("\n" + "=" * 60)
     print("步骤 2: 数据分析")
     print("=" * 60)
 
-    analyzer = StudentHeightAnalyzer(data_file)
-    results = analyzer.run_all_analysis()
+    df = load_data(data_file)
+    analyzer = StudentHeightAnalyzer(df)
 
-    return results
+    generator = ReportGenerator(analyzer)
+    generator.generate_full_report()
+
+    return analyzer
 
 
-def visualize_data(paths, data_file):
-    """生成可视化图表"""
+def visualize_data(data_file: str, output_dir: str) -> None:
+    """
+    生成可视化图表
+
+    Args:
+        data_file: 数据文件路径
+        output_dir: 输出目录
+    """
     print("\n" + "=" * 60)
     print("步骤 3: 数据可视化")
     print("=" * 60)
 
-    visualizer = HeightVisualizer(data_file, output_dir=paths['output'])
+    df = load_data(data_file)
+    visualizer = HeightVisualizer(df, output_dir=output_dir)
     visualizer.generate_all_plots()
 
 
-def run_full_pipeline(n=1000, skip_generation=False):
+def run_full_pipeline(n: int = 1000, skip_generation: bool = False) -> None:
     """
     运行完整的数据分析流程
 
-    参数:
+    Args:
         n: 生成的数据条数
         skip_generation: 是否跳过数据生成步骤
     """
-    paths = get_project_paths()
+    paths = get_project_paths_wrapper()
 
-    # 确保目录存在
-    for dir_path in paths.values():
-        os.makedirs(dir_path, exist_ok=True)
+    for dir_path in [paths['data'], paths['output']]:
+        ensure_dir(dir_path)
 
-    data_file = os.path.join(paths['data'], 'student_height_data.xlsx')
+    data_file = os.path.join(paths['data'], config.DEFAULT_DATA_FILENAME)
 
-    # 步骤1: 生成数据（如果需要）
     if not skip_generation or not os.path.exists(data_file):
         data_file = generate_data(paths, n=n)
     else:
         print(f"\n使用已有数据文件: {data_file}")
 
-    # 步骤2: 数据分析
-    analyze_data(paths, data_file)
-
-    # 步骤3: 数据可视化
-    visualize_data(paths, data_file)
+    analyze_data(data_file)
+    visualize_data(data_file, paths['output'])
 
     print("\n" + "=" * 60)
     print("所有任务已完成！")
@@ -146,7 +159,7 @@ def run_full_pipeline(n=1000, skip_generation=False):
     print("=" * 60)
 
 
-def main():
+def main() -> None:
     """主函数"""
     parser = argparse.ArgumentParser(
         description='小学生身高数据分析与可视化系统',
@@ -175,8 +188,7 @@ def main():
 
     args = parser.parse_args()
 
-    # 检查依赖
-    if not check_dependencies():
+    if not check_dependencies_wrapper():
         sys.exit(1)
 
     try:
